@@ -1,9 +1,36 @@
+use std::fmt::Debug;
+
+#[derive(Default, Debug)]
 pub struct N8 {
     cpu: CPU,
     mem: Ram256BU8,
 }
 
-#[derive(Default)]
+impl N8 {
+    pub fn cycle(&mut self) -> Result<(), code::DecodeError> {
+        let op = self.fetch();
+        let inst = code::decoder(op)?;
+        self.cpu.op(inst);
+        Ok(())
+    }
+    pub fn fetch(&mut self) -> u16 {
+        self.cpu.pc += 2;
+        u16::from_le_bytes([
+            self.mem.read(self.cpu.pc - 2),
+            self.mem.read(self.cpu.pc - 1),
+        ])
+    }
+    pub fn flush(&mut self, dis: u8, data: &[u8]) {
+        data.into_iter()
+            .enumerate()
+            .for_each(|(i, &d)| self.mem.write(dis + i as u8, d));
+    }
+    pub fn get_output(&self) -> u8 {
+        self.cpu.or
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct CPU {
     /// general register a
     a: u8,
@@ -11,8 +38,6 @@ pub struct CPU {
     pc: u8,
     /// output register
     or: u8,
-    /// fetch register
-    fr: u8,
     /// flag register
     f: u8,
 }
@@ -44,6 +69,7 @@ impl CPU {
     }
 }
 
+#[derive(Debug)]
 pub struct Ram256BU8 {
     mem: [u8; 65536],
 }
@@ -98,6 +124,32 @@ pub trait OtherInstruction {
     fn op(&self, cpu: &mut CPU);
 }
 
+pub mod code {
+    use super::InstructionSet;
+
+    pub fn decoder(inst: u16) -> Result<InstructionSet, DecodeError> {
+        use DecodeError::*;
+        use InstructionSet::*;
+        match inst.to_le_bytes() {
+            [x, y] if x < 7 => Ok(match (x, y) {
+                (0, im) => OutIm(im),
+                (1, addr) => Jp(addr),
+                (2, im) => LdAIm(im),
+                (3, _) => OutA,
+                (5, im) => AddAIm(im),
+                (6, addr) => JpF(addr),
+                (_, _) => Nop,
+            }),
+            _ => Err(UnknownCode(inst)),
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum DecodeError {
+        UnknownCode(u16),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +169,23 @@ mod tests {
         assert_eq!(cpu.a, 14);
         assert_eq!(cpu.pc, 220);
         assert_eq!(cpu.f, 1);
+    }
+
+    #[test]
+    fn n8_works() -> Result<(), code::DecodeError> {
+        let mut n8 = N8::default();
+        n8.flush(
+            0,
+            &[
+                0x02, 0x32, 0x05, 0x24, 0x03, 0x00, 0x05, 0xff, 0x06, 0x0c, 0x05, 0x22, 0x03, 0x00,
+            ],
+        );
+        // ld 0x32, add 0x24, out, add 0xff, jpf 0x0c, add 0x22, out
+        for _ in 0..6 {
+            n8.cycle()?;
+        }
+        assert_eq!(n8.get_output(), 0x55);
+        assert_eq!(n8.cpu.f, 1);
+        Ok(())
     }
 }
