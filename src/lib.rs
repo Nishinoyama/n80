@@ -2,6 +2,7 @@
 /// sample for 8-bit cpu which is hardcoded.
 /// RISC
 pub mod n8cpu;
+pub mod register;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
