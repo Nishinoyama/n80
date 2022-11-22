@@ -1,4 +1,6 @@
 // pub mod cpu;
+pub mod instruction;
+pub mod memory;
 pub mod n88cpu;
 /// sample for 8-bit cpu which is hardcoded.
 /// RISC
