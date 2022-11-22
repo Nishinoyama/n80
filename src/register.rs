@@ -1,5 +1,10 @@
 use std::mem::transmute;
 
+pub trait Register8 {
+    fn write(&mut self, bits: u8);
+    fn load(&self) -> u8;
+}
+
 pub trait Register16 {
     fn write(&mut self, bits: u16);
     fn load(&self) -> u16;
@@ -61,6 +66,22 @@ impl Register16 for R16Bits8Bits {
     }
     #[inline]
     fn load(&self) -> u16 {
+        self.bits
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct R8Bits {
+    bits: u8,
+}
+
+impl Register8 for R8Bits {
+    #[inline]
+    fn write(&mut self, bits: u8) {
+        self.bits = bits
+    }
+    #[inline]
+    fn load(&self) -> u8 {
         self.bits
     }
 }
