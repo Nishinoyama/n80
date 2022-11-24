@@ -1,19 +1,19 @@
 use std::marker::PhantomData;
 
 #[derive(Debug, Default)]
-pub struct InstructionDecoder<B, S> {
+pub struct InstructionDecoder<S: InstructionSet> {
     instruction_set: PhantomData<S>,
-    buf: Vec<B>,
+    buf: Vec<S::Code>,
 }
 
-impl<B, S: InstructionSet<B>> InstructionDecoder<B, S> {
+impl<S: InstructionSet> InstructionDecoder<S> {
     pub fn new() -> Self {
         Self {
             instruction_set: Default::default(),
             buf: vec![],
         }
     }
-    pub fn decode(&mut self, code: B) {
+    pub fn decode(&mut self, code: S::Code) {
         self.buf.push(code)
     }
     pub fn inst(&self) -> Option<S> {
@@ -21,7 +21,8 @@ impl<B, S: InstructionSet<B>> InstructionDecoder<B, S> {
     }
 }
 
-pub trait InstructionSet<B>: Sized {
-    fn decode(codes: &[B]) -> Option<Self>;
-    fn encode(self) -> Vec<B>;
+pub trait InstructionSet: Sized {
+    type Code;
+    fn decode(codes: &[Self::Code]) -> Option<Self>;
+    fn encode(self) -> Vec<Self::Code>;
 }

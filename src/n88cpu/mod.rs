@@ -30,10 +30,7 @@ pub mod cpu {
         }
 
         pub fn parse_instruct(&mut self) {
-            let mut parser = InstructionDecoder::<
-                u8,
-                N88InstructionSet<Bit8RegisterCode, Bit16RegisterCode>,
-            >::new();
+            let mut parser = InstructionDecoder::<N88InstructionSet>::new();
             while parser.inst().is_none() {
                 parser.decode(self.fetch());
             }
@@ -44,6 +41,7 @@ pub mod cpu {
 pub mod instruction {
     use crate::instruction::InstructionSet;
 
+    #[derive(Debug, Eq, PartialEq)]
     #[repr(u8)]
     pub enum Bit8RegisterCode {
         A = 7,
@@ -62,6 +60,7 @@ pub mod instruction {
         }
     }
 
+    #[derive(Debug, Eq, PartialEq)]
     #[repr(u8)]
     pub enum Bit16RegisterCode {
         BC = 0,
@@ -77,22 +76,21 @@ pub mod instruction {
         }
     }
 
-    pub trait RegisterCode {}
-
+    #[derive(Eq, PartialEq, Debug)]
     /// All Data and Addr are Little Endian
-    pub enum N88InstructionSet<RC8, RC16> {
+    pub enum N88InstructionSet {
         /// Move Register 01DDDSSS
-        MovRR(RC8, RC8),
+        MovRR(Bit8RegisterCode, Bit8RegisterCode),
         /// Move from memory. 01DDD110
-        MovRM(RC8),
+        MovRM(Bit8RegisterCode),
         /// Move to memory. 01110SSS
-        MovMR(RC8),
+        MovMR(Bit8RegisterCode),
         /// Move immediate. 00DDD110 Data
-        MviR(RC8, u8),
+        MviR(Bit8RegisterCode, u8),
         /// Move to memory immediate. 00110110 Data
         MviM(u8),
         ///  Move to register pair. 00RP0001 Data
-        LxiR(RC16, u16),
+        LxiR(Bit16RegisterCode, u16),
         /// Load acc direct. 00111010 Addr
         Lda(u16),
         /// Store acc direct. 00110010 Addr
@@ -102,59 +100,59 @@ pub mod instruction {
         /// Store HL direct. 00100010 Addr
         Shld(u16),
         /// Load acc indirect. 00RP1010
-        Ldax(RC16),
+        Ldax(Bit16RegisterCode),
         /// Store acc indirect. 00RP0010
-        Stax(RC16),
+        Stax(Bit16RegisterCode),
         /// Exchange H and L with D and E
         Xchg,
         /// Add register, A <- A + r. 10000SSS
-        AddR(RC8),
+        AddR(Bit8RegisterCode),
         /// Add memory, A <- A + (HL). 10000110
         AddM,
         /// Add immediate A <- A + d. 11000110 Data
         Adi(u8),
         /// Add register with carry. 10001SSS
-        AdcR(RC8),
+        AdcR(Bit8RegisterCode),
         /// Add memory with carry. 10001110
         AdcM,
         /// Add immediate with carry. 11001110 Data
         Aci(u8),
         /// Subtract register, A <- A - r. 10010SSS
-        SubR(RC8),
+        SubR(Bit8RegisterCode),
         /// Subtract memory, A <- A - (HL). 10010110
         SubM,
         /// Subtract immediate, A <- A - d. 11010110
-        Subi(u8),
-        SbbR(RC8),
+        Sui(u8),
+        SbbR(Bit8RegisterCode),
         SbbM,
         Sbi(u8),
         /// Increment register. 00DDD100
-        InrR(RC8),
+        InrR(Bit8RegisterCode),
         InrM,
-        DcrR(RC8),
+        DcrR(Bit8RegisterCode),
         DcrM,
-        Inx(RC16),
-        Dcx(RC16),
+        Inx(Bit16RegisterCode),
+        Dcx(Bit16RegisterCode),
         /// Add register pair to HL. 00RP1001
-        Dad(RC16),
+        Dad(Bit16RegisterCode),
         /// Decimal adjust acc. 00100111
         Daa,
         /// AND register. 10100SSS
-        AnaR(RC8),
+        AnaR(Bit8RegisterCode),
         /// AND memory. 10100110
         AnaM,
         /// AND immediate. 11100110 Data
         Ani(u8),
         /// XOR register. 10101SSS
-        XraR(RC8),
+        XraR(Bit8RegisterCode),
         XraM,
         Xri(u8),
         /// OR register. 10110SSS
-        OraR(RC8),
+        OraR(Bit8RegisterCode),
         OraM,
         Ori(u8),
         /// Compare register, set flags of A - r. 10111SSS
-        CmpR(RC8),
+        CmpR(Bit8RegisterCode),
         CmpM,
         Cpi(u8),
         /// Rotate left. 00000111
@@ -227,7 +225,7 @@ pub mod instruction {
         PcHL,
         /// Push. 11RP0101
         /// RP = 11 which is SP is not allowed.
-        PushRP(RC16),
+        PushRP(Bit16RegisterCode),
         /// Push processor status word. 11110101
         ///
         /// (SP-1) <- A
@@ -236,7 +234,7 @@ pub mod instruction {
         PushPSW,
         /// Pop. 11RP0001
         /// RP = 11 which is SP is not allowed.
-        PopRP(RC16),
+        PopRP(Bit16RegisterCode),
         /// Push processor status word. 11110001
         PopPSW,
         /// Exchange stack top with HL. 11100011
@@ -257,7 +255,15 @@ pub mod instruction {
         Nop,
     }
 
-    impl InstructionSet<u8> for N88InstructionSet<Bit8RegisterCode, Bit16RegisterCode> {
+    impl Default for N88InstructionSet {
+        fn default() -> Self {
+            Self::Nop
+        }
+    }
+
+    impl InstructionSet for N88InstructionSet {
+        type Code = u8;
+
         fn decode(codes: &[u8]) -> Option<Self> {
             use N88InstructionSet::*;
             if codes.is_empty() {
@@ -327,12 +333,62 @@ pub mod instruction {
                         _ => unreachable!(),
                     },
                     0b11 => match (r1, r2) {
-                        (0b111, 0b011) => Some(EI),
-                        (0b110, 0b011) => Some(DI),
-                        (0b100, 0b011) => Some(XtHL),
+                        (cond, 0b000) => dd.map(match cond {
+                            0b000 => Rnz,
+                            0b001 => Rz,
+                            0b010 => Rnc,
+                            0b011 => Rc,
+                            0b100 => Rpo,
+                            0b101 => Rpe,
+                            0b110 => Rp,
+                            0b111 => Rm,
+                            _ => unreachable!(),
+                        }),
                         (0b001, 0b001) => Some(Ret),
                         (0b101, 0b001) => Some(PcHL),
                         (0b111, 0b001) => Some(SpHL),
+                        (0b110, 0b001) => Some(PopPSW),
+                        (pr, 0b001) => Some(PopRP((pr >> 1).into())),
+                        (cond, 0b010) => dd.map(match cond {
+                            0b000 => Jnz,
+                            0b001 => Jz,
+                            0b010 => Jnc,
+                            0b011 => Jc,
+                            0b100 => Jpo,
+                            0b101 => Jpe,
+                            0b110 => Jp,
+                            0b111 => Jm,
+                            _ => unreachable!(),
+                        }),
+                        (0b000, 0b011) => dd.map(Jmp),
+                        (0b010, 0b011) => d1.map(Out),
+                        (0b011, 0b011) => d1.map(In),
+                        (0b111, 0b011) => Some(EI),
+                        (0b110, 0b011) => Some(DI),
+                        (0b100, 0b011) => Some(XtHL),
+                        (cond, 0b100) => dd.map(match cond {
+                            0b000 => Cnz,
+                            0b001 => Cz,
+                            0b010 => Cnc,
+                            0b011 => Cc,
+                            0b100 => Cpo,
+                            0b101 => Cpe,
+                            0b110 => Cp,
+                            0b111 => Cm,
+                            _ => unreachable!(),
+                        }),
+                        (0b001, 0b101) => dd.map(Call),
+                        (0b110, 0b101) => Some(PushPSW),
+                        (pr, 0b101) => Some(PushRP((pr >> 1).into())),
+                        (0b000, 0b110) => d1.map(Adi),
+                        (0b001, 0b110) => d1.map(Aci),
+                        (0b010, 0b110) => d1.map(Sui),
+                        (0b011, 0b110) => d1.map(Sbi),
+                        (0b100, 0b110) => d1.map(Ani),
+                        (0b101, 0b110) => d1.map(Xri),
+                        (0b110, 0b110) => d1.map(Ori),
+                        (0b111, 0b110) => d1.map(Cpi),
+                        (n, 0b111) => Some(Rst(n as u16)),
                         _ => None,
                     },
                     _ => unreachable!(),
@@ -341,6 +397,44 @@ pub mod instruction {
         }
         fn encode(self) -> Vec<u8> {
             todo!()
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use crate::instruction::InstructionDecoder;
+        use crate::n88cpu::instruction::{Bit8RegisterCode, N88InstructionSet};
+
+        #[test]
+        fn from() {
+            use Bit8RegisterCode::*;
+            let t = (0..8)
+                .filter(|t| !6.eq(t))
+                .map(Bit8RegisterCode::from)
+                .collect::<Vec<_>>();
+            let s = vec![B, C, D, E, H, L, A];
+            assert_eq!(t, s);
+        }
+
+        #[test]
+        fn instruction_universe() {
+            let t = (0..=255).for_each(|inst| {
+                let mut d = InstructionDecoder::<N88InstructionSet>::default();
+                d.decode(inst);
+                let res = d.inst();
+                if res.is_none() {
+                    d.decode(63)
+                };
+                let res = d.inst();
+                if res.is_none() {
+                    d.decode(71)
+                };
+                let res = d.inst();
+                print!("{:?}\t", res.unwrap_or_default());
+                if inst % 16 == 15 {
+                    println!()
+                }
+            });
         }
     }
 }
