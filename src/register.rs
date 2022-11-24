@@ -1,20 +1,15 @@
 use std::mem::transmute;
 
-pub trait Register8 {
-    fn write(&mut self, bits: u8);
-    fn load(&self) -> u8;
+pub trait Register<B> {
+    fn write(&mut self, bits: B);
+    fn load(&self) -> B;
 }
 
-pub trait Register16 {
-    fn write(&mut self, bits: u16);
-    fn load(&self) -> u16;
-}
-
-pub trait Register16Dividable: Register16 {
-    fn write_l(&mut self, bits: u8);
-    fn load_l(&self) -> u8;
-    fn write_h(&mut self, bits: u8);
-    fn load_h(&self) -> u8;
+pub trait RegisterDividable<B, C>: Register<B> {
+    fn write_l(&mut self, bits: C);
+    fn load_l(&self) -> C;
+    fn write_h(&mut self, bits: C);
+    fn load_h(&self) -> C;
 }
 
 #[derive(Debug, Default, Clone)]
@@ -22,7 +17,7 @@ pub struct R16Bits {
     bits: u16,
 }
 
-impl Register16 for R16Bits {
+impl Register<u16> for R16Bits {
     #[inline]
     fn write(&mut self, bits: u16) {
         self.bits = bits
@@ -38,7 +33,7 @@ pub struct R16Bits8Bits {
     bits: u16,
 }
 
-impl Register16Dividable for R16Bits8Bits {
+impl RegisterDividable<u16, u8> for R16Bits {
     fn write_l(&mut self, bits: u8) {
         unsafe {
             *transmute::<&u16, *mut u8>(&self.bits).add(1) = bits;
@@ -59,7 +54,7 @@ impl Register16Dividable for R16Bits8Bits {
     }
 }
 
-impl Register16 for R16Bits8Bits {
+impl Register<u16> for R16Bits8Bits {
     #[inline]
     fn write(&mut self, bits: u16) {
         self.bits = bits
@@ -75,7 +70,7 @@ pub struct R8Bits {
     bits: u8,
 }
 
-impl Register8 for R8Bits {
+impl Register<u8> for R8Bits {
     #[inline]
     fn write(&mut self, bits: u8) {
         self.bits = bits
@@ -88,11 +83,11 @@ impl Register8 for R8Bits {
 
 #[cfg(test)]
 mod test {
-    use crate::register::{R16Bits8Bits, Register16, Register16Dividable};
+    use crate::register::{R16Bits, Register, RegisterDividable};
 
     #[test]
     fn set_get_register() {
-        let mut reg = R16Bits8Bits::default();
+        let mut reg = R16Bits::default();
         reg.write(0x0123_u16.to_be());
         assert_eq!(reg.load().to_be(), 0x0123);
         assert_eq!(reg.load_h(), 0x01);

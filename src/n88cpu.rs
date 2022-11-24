@@ -3,20 +3,26 @@ pub mod cpu {
     use crate::memory::{Memory, Memory8Bit64KB};
     use crate::n88cpu::alu::ArithmeticLogicUnit88;
     use crate::n88cpu::instruction::N88InstructionSet;
-    use crate::register::{R16Bits, R16Bits8Bits, R8Bits, Register16, Register8};
+    use crate::register::{Register, RegisterDividable};
 
-    pub struct CPU88<M> {
+    pub struct CPU88<M, R, RD, RA> {
         alu: ArithmeticLogicUnit88,
         mem: M,
-        a: R8Bits,
-        bc: R16Bits8Bits,
-        de: R16Bits8Bits,
-        hl: R16Bits8Bits,
-        sp: R16Bits,
-        pc: R16Bits,
+        a: RA,
+        bc: RD,
+        de: RD,
+        hl: RD,
+        sp: R,
+        pc: R,
     }
 
-    impl<M: Memory<u16, u8>> CPU88<M> {
+    impl<
+            M: Memory<u16, u8>,
+            R: Register<u16>,
+            RD: RegisterDividable<u16, u8>,
+            RA: Register<u8>,
+        > CPU88<M, R, RD, RA>
+    {
         pub fn fetch(&mut self) -> u8 {
             let t = self.mem.load(self.pc.load());
             self.pc.write(self.pc.load().wrapping_add(1));
@@ -57,7 +63,7 @@ pub mod instruction {
 }
 
 pub mod alu {
-    use crate::register::{R8Bits, Register8};
+    use crate::register::{R8Bits, Register};
 
     /// Flag Carry
     const F_CARRY: u8 = 1;
