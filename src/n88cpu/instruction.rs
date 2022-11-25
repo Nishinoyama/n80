@@ -378,7 +378,7 @@ mod test {
     #[test]
     fn instruction_universe() {
         (0..=255).for_each(|inst| {
-            let mut d = InstructionDecoder::<N88InstructionSet>::new();
+            let mut d = InstructionDecoder::<N88InstructionSet>::default();
             d.push(inst);
             let res = d.decode();
             if res.is_none() {
@@ -389,10 +389,6 @@ mod test {
                 d.push(71)
             };
             let res = d.decode();
-            print!("{:?}\t", res.unwrap_or_default());
-            if inst % 16 == 15 {
-                println!()
-            }
         });
     }
 }

@@ -3,6 +3,7 @@ use crate::memory::{Memory, Memory8Bit64KB};
 use crate::n88cpu::alu::ArithmeticLogicUnit88;
 use crate::n88cpu::instruction::{Bit16RegisterCode, Bit8RegisterCode, N88InstructionSet};
 use crate::register::{R16Bits, R16Bits8Bits, R8Bits, Register, RegisterDividable};
+use std::fmt::{Debug, Formatter};
 
 pub struct CPU88<
     M: Memory<u16, u8>,
@@ -20,6 +21,24 @@ pub struct CPU88<
     pc: R,
     interruptable: bool,
     halted: bool,
+}
+
+impl Debug for CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut builder = String::new();
+        builder += &format!("pc: {:04x}\n", self.pc.load());
+        builder += &format!("sp: {:04x}\n", self.sp.load());
+        builder += &format!("af: {:08b} {:08b}\n", self.a.load(), self.alu.load_flag());
+        builder += &format!("bc: {:08b} {:08b}\n", self.bc.load_h(), self.bc.load_l());
+        builder += &format!("de: {:08b} {:08b}\n", self.de.load_h(), self.de.load_l());
+        builder += &format!("hl: {:08b} {:08b}\n", self.hl.load_h(), self.hl.load_l());
+        builder += "mem:\n";
+        builder += &format!("({:04x}):", self.pc.load());
+        (self.pc.load()..self.pc.load().saturating_add(32)).for_each(|i| {
+            builder += &format!(" {:02x}", self.mem.load(i));
+        });
+        writeln!(f, "{}", builder)
+    }
 }
 
 impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
@@ -44,24 +63,24 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             .for_each(|(i, &b)| self.write_mem_at(i as u16, b))
     }
 
-    pub fn fetch(&mut self) -> u8 {
+    fn fetch(&mut self) -> u8 {
         let t = self.mem.load(self.pc.load());
         self.pc.write(self.pc.load().wrapping_add(1));
         t
     }
 
-    pub fn parse_instruct(&mut self) {
-        let mut parser = InstructionDecoder::<N88InstructionSet>::new();
-        let inst = loop {
+    fn fetch_instruct(&mut self) -> N88InstructionSet {
+        let mut parser = InstructionDecoder::<N88InstructionSet>::default();
+        loop {
             parser.push(self.fetch());
+            println!("{:?}", parser);
             if let Some(inst) = parser.decode() {
-                break inst;
+                return inst;
             }
-        };
-        self.run_instruct(inst);
+        }
     }
 
-    pub fn load8_by_code(&self, r: Bit8RegisterCode) -> u8 {
+    fn load8_by_code(&self, r: Bit8RegisterCode) -> u8 {
         match r {
             Bit8RegisterCode::A => self.a.load(),
             Bit8RegisterCode::B => self.bc.load_h(),
@@ -73,7 +92,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         }
     }
 
-    pub fn write8_by_code(&mut self, r: Bit8RegisterCode, b: u8) {
+    fn write8_by_code(&mut self, r: Bit8RegisterCode, b: u8) {
         match r {
             Bit8RegisterCode::A => self.a.write(b),
             Bit8RegisterCode::B => self.bc.write_h(b),
@@ -85,7 +104,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         }
     }
 
-    pub fn load16_by_code(&self, rp: Bit16RegisterCode) -> u16 {
+    fn load16_by_code(&self, rp: Bit16RegisterCode) -> u16 {
         match rp {
             Bit16RegisterCode::BC => self.bc.load(),
             Bit16RegisterCode::DE => self.de.load(),
@@ -94,7 +113,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         }
     }
 
-    pub fn write16_by_code(&mut self, rp: Bit16RegisterCode, bb: u16) {
+    fn write16_by_code(&mut self, rp: Bit16RegisterCode, bb: u16) {
         match rp {
             Bit16RegisterCode::BC => self.bc.write(bb),
             Bit16RegisterCode::DE => self.de.write(bb),
@@ -103,73 +122,81 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         }
     }
 
-    pub fn load_mem_hl(&self) -> u8 {
+    fn load_mem_hl(&self) -> u8 {
         self.mem.load(self.hl.load())
     }
 
-    pub fn write_mem_hl(&mut self, bits: u8) {
+    fn write_mem_hl(&mut self, bits: u8) {
         self.mem.write(self.hl.load(), bits)
     }
 
-    pub fn load_mem_at(&self, addr: u16) -> u8 {
+    fn load_mem_at(&self, addr: u16) -> u8 {
         self.mem.load(addr)
     }
 
-    pub fn write_mem_at(&mut self, addr: u16, b: u8) {
+    fn write_mem_at(&mut self, addr: u16, b: u8) {
         self.mem.write(addr, b)
     }
 
-    pub fn load16_mem_at(&self, addr: u16) -> u16 {
+    fn load16_mem_at(&self, addr: u16) -> u16 {
         u16::from_ne_bytes([self.mem.load(addr), self.mem.load(addr + 1)])
     }
 
-    pub fn write16_mem_at(&mut self, addr: u16, bb: u16) {
+    fn write16_mem_at(&mut self, addr: u16, bb: u16) {
         bb.to_ne_bytes()
             .into_iter()
             .enumerate()
             .for_each(|(i, b)| self.mem.write(addr + i as u16, b))
     }
 
-    pub fn load_acc(&self) -> u8 {
+    fn load_acc(&self) -> u8 {
         self.a.load()
     }
 
-    pub fn write_acc(&mut self, b: u8) {
+    fn write_acc(&mut self, b: u8) {
         self.a.write(b)
     }
 
-    pub fn jump(&mut self, addr: u16) {
+    fn jump(&mut self, addr: u16) {
         self.pc.write(addr)
     }
 
-    pub fn jump_on(&mut self, flag: u8, is: bool, addr: u16) {
+    fn jump_on(&mut self, flag: u8, is: bool, addr: u16) {
         if self.alu.get_flag_of(flag) == is {
             self.jump(addr)
         }
     }
 
-    pub fn call(&mut self, addr: u16) {
+    fn call(&mut self, addr: u16) {
         let sp = self.sp.load().wrapping_sub(2);
         self.write16_mem_at(sp, self.pc.load());
         self.sp.write(sp);
         self.jump(addr);
     }
 
-    pub fn call_on(&mut self, flag: u8, is: bool, addr: u16) {
+    fn call_on(&mut self, flag: u8, is: bool, addr: u16) {
         if self.alu.get_flag_of(flag) == is {
             self.call(addr)
         }
     }
 
-    pub fn ret(&mut self) {
+    fn ret(&mut self) {
         let sp = self.sp.load();
         self.jump(self.load16_mem_at(sp));
         self.sp.write(sp.wrapping_add(2));
     }
 
-    pub fn ret_on(&mut self, flag: u8, is: bool) {
+    fn ret_on(&mut self, flag: u8, is: bool) {
         if self.alu.get_flag_of(flag) == is {
             self.ret()
+        }
+    }
+
+    pub fn run(&mut self) {
+        self.halted = false;
+        while !self.halted {
+            let inst = self.fetch_instruct();
+            self.run_instruct(inst);
         }
     }
 
@@ -418,9 +445,26 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             Hlt => self.halted = true,
             Nop => {}
         }
-        #[test]
-        fn cpu_test() {
-            let mut cpu = CPU88::new();
-        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::instruction::InstructionDecoder;
+    use crate::n88cpu::cpu::CPU88;
+    use crate::n88cpu::instruction::N88InstructionSet;
+
+    #[test]
+    fn cpu_test() {
+        let mut cpu = CPU88::new();
+        let codes = &[0b00111110, 0x36, 0b11010011, 0b01110110];
+        cpu.flush(codes);
+        let mut decoder = InstructionDecoder::<N88InstructionSet>::default();
+        decoder.push(codes[0]);
+        decoder.push(codes[1]);
+        println!("{:?}", decoder.decode());
+        println!("{:?}", cpu);
+        // cpu.run();
+        println!("{:?}", cpu);
     }
 }
