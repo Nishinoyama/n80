@@ -192,7 +192,7 @@ impl ArithmeticLogicUnit88 {
         x
     }
     pub fn dad(&mut self, hl: u16, n: u16) -> u16 {
-        let (x, ovf) = hl.overflowing_add(hl);
+        let (x, ovf) = hl.overflowing_add(n);
         self.change_flag_of(F_CARRY, ovf);
         self.change_flag_of(F_HALF_CARRY, hl % 0x1000 + n % 0x1000 > 0x1000);
         x

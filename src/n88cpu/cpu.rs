@@ -73,7 +73,6 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         let mut parser = InstructionDecoder::<N88InstructionSet>::default();
         loop {
             parser.push(self.fetch());
-            println!("{:?}", parser);
             if let Some(inst) = parser.decode() {
                 return inst;
             }
@@ -298,8 +297,8 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             Dad(rp) => {
                 let hl = self
                     .alu
-                    .dad(self.load16_by_code(HL), self.load16_by_code(rp));
-                self.write16_by_code(HL, hl);
+                    .dad(self.hl.load(), self.load16_by_code(rp));
+                self.hl.write(hl);
             }
             Daa => {
                 // TODO: neg true?
@@ -453,18 +452,24 @@ mod test {
     use crate::instruction::InstructionDecoder;
     use crate::n88cpu::cpu::CPU88;
     use crate::n88cpu::instruction::N88InstructionSet;
+    use crate::register::Register;
 
     #[test]
     fn cpu_test() {
         let mut cpu = CPU88::new();
-        let codes = &[0b00111110, 0x36, 0b11010011, 0b01110110];
+        // calculate sum of 1..=80 (that equals 3240 = 81 * 80 / 2)
+        let codes = &[
+            0x3e, 0x50,       //       mov a,=80
+            0x47,             // loop: mov b,a
+            0x09,             //       dad b
+            0x3d,             //       dcr a
+            0xc2, 0x02, 0x00, //       jnz loop
+            0x76,             //       halt
+        ];
         cpu.flush(codes);
-        let mut decoder = InstructionDecoder::<N88InstructionSet>::default();
-        decoder.push(codes[0]);
-        decoder.push(codes[1]);
-        println!("{:?}", decoder.decode());
         println!("{:?}", cpu);
-        // cpu.run();
+        cpu.run();
         println!("{:?}", cpu);
+        assert_eq!(cpu.hl.load(), (1..=0x50).sum());
     }
 }

@@ -237,7 +237,13 @@ impl InstructionSet for N88InstructionSet {
             match c {
                 0b00 => match (r1, r2) {
                     (0b000, 0b000) => Some(Nop),
-                    (rp, 0b001) => dd.map(|dd| LxiR((rp >> 1).into(), dd)),
+                    (rp, 0b001) =>
+                        if rp & 1 == 1 {
+                            Some(Dad((rp >> 1).into()))
+                        } else {
+                            dd.map(|dd| LxiR((rp >> 1).into(), dd))
+                        }
+                    ,
                     (0b000, 0b010) => Some(Stax(Bit16RegisterCode::BC)),
                     (0b001, 0b010) => Some(Ldax(Bit16RegisterCode::BC)),
                     (0b010, 0b010) => Some(Stax(Bit16RegisterCode::DE)),
