@@ -33,7 +33,7 @@ pub struct R16Bits8Bits {
     bits: u16,
 }
 
-impl RegisterDividable<u16, u8> for R16Bits {
+impl RegisterDividable<u16, u8> for R16Bits8Bits {
     fn write_l(&mut self, bits: u8) {
         unsafe {
             *transmute::<&u16, *mut u8>(&self.bits).add(1) = bits;
@@ -83,11 +83,11 @@ impl Register<u8> for R8Bits {
 
 #[cfg(test)]
 mod test {
-    use crate::register::{R16Bits, Register, RegisterDividable};
+    use crate::register::{R16Bits8Bits, Register, RegisterDividable};
 
     #[test]
     fn set_get_register() {
-        let mut reg = R16Bits::default();
+        let mut reg = R16Bits8Bits::default();
         reg.write(0x0123_u16.to_be());
         assert_eq!(reg.load().to_be(), 0x0123);
         assert_eq!(reg.load_h(), 0x01);
