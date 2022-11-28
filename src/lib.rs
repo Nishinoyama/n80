@@ -6,6 +6,7 @@ pub mod n88cpu;
 /// RISC
 pub mod n8cpu;
 pub mod register;
+pub mod register_set;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

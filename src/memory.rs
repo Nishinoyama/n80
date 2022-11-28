@@ -1,6 +1,8 @@
-pub trait Memory<S, T> {
-    fn load(&self, index: S) -> T;
-    fn write(&mut self, index: S, data: T);
+pub trait Memory {
+    type Address;
+    type Data;
+    fn load(&self, index: Self::Address) -> Self::Data;
+    fn write(&mut self, index: Self::Address, data: Self::Data);
 }
 
 #[derive(Debug)]
@@ -16,7 +18,9 @@ impl Default for Memory8Bit64KB {
     }
 }
 
-impl Memory<u16, u8> for Memory8Bit64KB {
+impl Memory for Memory8Bit64KB {
+    type Address = u16;
+    type Data = u8;
     fn load(&self, index: u16) -> u8 {
         self.bytes[index as usize]
     }

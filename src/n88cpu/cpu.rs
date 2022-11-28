@@ -3,35 +3,99 @@ use crate::memory::{Memory, Memory8Bit64KB};
 use crate::n88cpu::alu::ArithmeticLogicUnit88;
 use crate::n88cpu::instruction::{Bit16RegisterCode, Bit8RegisterCode, N88InstructionSet};
 use crate::register::{R16Bits, R16Bits8Bits, R8Bits, Register, RegisterDividable};
+use crate::register_set::RegisterSet;
 use std::fmt::{Debug, Formatter};
 
-pub struct CPU88<
-    M: Memory<u16, u8>,
-    R: Register<u16>,
-    RD: RegisterDividable<u16, u8>,
-    RA: Register<u8>,
-> {
+#[derive(Default)]
+pub struct N88RegisterSet {
+    a: R8Bits,
+    bc: R16Bits8Bits,
+    de: R16Bits8Bits,
+    hl: R16Bits8Bits,
+    sp: R16Bits,
+}
+
+impl Debug for N88RegisterSet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut builder = String::new();
+        builder += &format!("sp: {:04x}\n", self.sp.load());
+        builder += &format!("a : {:08b}\n", self.a.load());
+        builder += &format!("bc: {:08b} {:08b}\n", self.bc.load_h(), self.bc.load_l());
+        builder += &format!("de: {:08b} {:08b}\n", self.de.load_h(), self.de.load_l());
+        builder += &format!("hl: {:08b} {:08b}\n", self.hl.load_h(), self.hl.load_l());
+        builder += "mem:\n";
+        writeln!(f, "{}", builder)
+    }
+}
+
+impl RegisterSet<Bit8RegisterCode> for N88RegisterSet {
+    type RegisterSize = u8;
+
+    fn load(&self, code: Bit8RegisterCode) -> Self::RegisterSize {
+        use Bit8RegisterCode::*;
+        match code {
+            A => self.a.load(),
+            B => self.bc.load_h(),
+            C => self.bc.load_l(),
+            D => self.de.load_h(),
+            E => self.de.load_l(),
+            H => self.hl.load_h(),
+            L => self.hl.load_l(),
+        }
+    }
+
+    fn write(&mut self, code: Bit8RegisterCode, bits: Self::RegisterSize) {
+        use Bit8RegisterCode::*;
+        match code {
+            A => self.a.write(bits),
+            B => self.bc.write_h(bits),
+            C => self.bc.write_l(bits),
+            D => self.de.write_h(bits),
+            E => self.de.write_l(bits),
+            H => self.hl.write_h(bits),
+            L => self.hl.write_l(bits),
+        }
+    }
+}
+
+impl RegisterSet<Bit16RegisterCode> for N88RegisterSet {
+    type RegisterSize = u16;
+
+    fn load(&self, code: Bit16RegisterCode) -> Self::RegisterSize {
+        use Bit16RegisterCode::*;
+        match code {
+            BC => self.bc.load(),
+            DE => self.de.load(),
+            HL => self.hl.load(),
+            SP => self.sp.load(),
+        }
+    }
+
+    fn write(&mut self, code: Bit16RegisterCode, bits: Self::RegisterSize) {
+        use Bit16RegisterCode::*;
+        match code {
+            BC => self.bc.write(bits),
+            DE => self.de.write(bits),
+            HL => self.hl.write(bits),
+            SP => self.sp.write(bits),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct CPU88<M: Memory<Address = u16, Data = u8>> {
     alu: ArithmeticLogicUnit88,
     mem: M,
-    a: RA,
-    bc: RD,
-    de: RD,
-    hl: RD,
-    sp: R,
-    pc: R,
+    registers: N88RegisterSet,
+    pc: R16Bits,
     interruptable: bool,
     halted: bool,
 }
 
-impl Debug for CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
+impl Debug for CPU88<Memory8Bit64KB> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut builder = String::new();
-        builder += &format!("pc: {:04x}\n", self.pc.load());
-        builder += &format!("sp: {:04x}\n", self.sp.load());
-        builder += &format!("af: {:08b} {:08b}\n", self.a.load(), self.alu.load_flag());
-        builder += &format!("bc: {:08b} {:08b}\n", self.bc.load_h(), self.bc.load_l());
-        builder += &format!("de: {:08b} {:08b}\n", self.de.load_h(), self.de.load_l());
-        builder += &format!("hl: {:08b} {:08b}\n", self.hl.load_h(), self.hl.load_l());
+        builder += &format!("{:?}\n", self.registers);
         builder += "mem:\n";
         builder += &format!("({:04x}):", self.pc.load());
         (self.pc.load()..self.pc.load().saturating_add(32)).for_each(|i| {
@@ -41,17 +105,13 @@ impl Debug for CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
     }
 }
 
-impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
-    pub fn new() -> CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
+impl CPU88<Memory8Bit64KB> {
+    pub fn new() -> CPU88<Memory8Bit64KB> {
         CPU88 {
             alu: ArithmeticLogicUnit88::default(),
             mem: Memory8Bit64KB::default(),
-            a: R8Bits::default(),
-            bc: R16Bits8Bits::default(),
-            de: R16Bits8Bits::default(),
-            hl: R16Bits8Bits::default(),
-            sp: R16Bits::default(),
-            pc: R16Bits::default(),
+            registers: N88RegisterSet::default(),
+            pc: Default::default(),
             interruptable: false,
             halted: false,
         }
@@ -79,54 +139,28 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         }
     }
 
-    fn load8_by_code(&self, r: Bit8RegisterCode) -> u8 {
-        match r {
-            Bit8RegisterCode::A => self.a.load(),
-            Bit8RegisterCode::B => self.bc.load_h(),
-            Bit8RegisterCode::C => self.bc.load_l(),
-            Bit8RegisterCode::D => self.de.load_h(),
-            Bit8RegisterCode::E => self.de.load_l(),
-            Bit8RegisterCode::H => self.hl.load_h(),
-            Bit8RegisterCode::L => self.hl.load_l(),
-        }
+    fn load_by_code(&self, code: Bit8RegisterCode) -> u8 {
+        self.registers.load(code)
     }
 
-    fn write8_by_code(&mut self, r: Bit8RegisterCode, b: u8) {
-        match r {
-            Bit8RegisterCode::A => self.a.write(b),
-            Bit8RegisterCode::B => self.bc.write_h(b),
-            Bit8RegisterCode::C => self.bc.write_l(b),
-            Bit8RegisterCode::D => self.de.write_h(b),
-            Bit8RegisterCode::E => self.de.write_l(b),
-            Bit8RegisterCode::H => self.hl.write_h(b),
-            Bit8RegisterCode::L => self.hl.write_l(b),
-        }
+    fn write_by_code(&mut self, code: Bit8RegisterCode, bits: u8) {
+        self.registers.write(code, bits);
     }
 
-    fn load16_by_code(&self, rp: Bit16RegisterCode) -> u16 {
-        match rp {
-            Bit16RegisterCode::BC => self.bc.load(),
-            Bit16RegisterCode::DE => self.de.load(),
-            Bit16RegisterCode::HL => self.hl.load(),
-            Bit16RegisterCode::SP => self.sp.load(),
-        }
+    fn load16_by_code(&self, code: Bit16RegisterCode) -> u16 {
+        self.registers.load(code)
     }
 
-    fn write16_by_code(&mut self, rp: Bit16RegisterCode, bb: u16) {
-        match rp {
-            Bit16RegisterCode::BC => self.bc.write(bb),
-            Bit16RegisterCode::DE => self.de.write(bb),
-            Bit16RegisterCode::HL => self.hl.write(bb),
-            Bit16RegisterCode::SP => self.sp.write(bb),
-        }
+    fn write16_by_code(&mut self, code: Bit16RegisterCode, bits: u16) {
+        self.registers.write(code, bits);
     }
 
     fn load_mem_hl(&self) -> u8 {
-        self.mem.load(self.hl.load())
+        self.mem.load(self.registers.hl.load())
     }
 
     fn write_mem_hl(&mut self, bits: u8) {
-        self.mem.write(self.hl.load(), bits)
+        self.mem.write(self.registers.hl.load(), bits)
     }
 
     fn load_mem_at(&self, addr: u16) -> u8 {
@@ -149,11 +183,11 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
     }
 
     fn load_acc(&self) -> u8 {
-        self.a.load()
+        self.registers.a.load()
     }
 
     fn write_acc(&mut self, b: u8) {
-        self.a.write(b)
+        self.registers.a.write(b)
     }
 
     fn jump(&mut self, addr: u16) {
@@ -167,9 +201,9 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
     }
 
     fn call(&mut self, addr: u16) {
-        let sp = self.sp.load().wrapping_sub(2);
+        let sp = self.registers.sp.load().wrapping_sub(2);
         self.write16_mem_at(sp, self.pc.load());
-        self.sp.write(sp);
+        self.registers.sp.write(sp);
         self.jump(addr);
     }
 
@@ -180,9 +214,9 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
     }
 
     fn ret(&mut self) {
-        let sp = self.sp.load();
+        let sp = self.registers.sp.load();
         self.jump(self.load16_mem_at(sp));
-        self.sp.write(sp.wrapping_add(2));
+        self.registers.sp.write(sp.wrapping_add(2));
     }
 
     fn ret_on(&mut self, flag: u8, is: bool) {
@@ -205,10 +239,10 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
         use Bit8RegisterCode::*;
         use N88InstructionSet::*;
         match inst {
-            MovRR(d, s) => self.write8_by_code(d, self.load8_by_code(s)),
-            MovRM(r) => self.write8_by_code(r, self.load_mem_hl()),
-            MovMR(r) => self.write_mem_hl(self.load8_by_code(r)),
-            MviR(r, b) => self.write8_by_code(r, b),
+            MovRR(d, s) => self.write_by_code(d, self.load_by_code(s)),
+            MovRM(r) => self.write_by_code(r, self.load_mem_hl()),
+            MovMR(r) => self.write_mem_hl(self.load_by_code(r)),
+            MviR(r, b) => self.write_by_code(r, b),
             MviM(b) => self.write_mem_hl(b),
             LxiR(rp, bb) => self.write16_by_code(rp, bb),
             Lda(addr) => self.write_acc(self.load_mem_at(addr)),
@@ -218,12 +252,12 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             Ldax(rp) => self.write_acc(self.load_mem_at(self.load16_by_code(rp))),
             Stax(rp) => self.write_mem_at(self.load16_by_code(rp), self.load_acc()),
             Xchg => {
-                let (hl, de) = (self.hl.load(), self.de.load());
-                self.de.write(hl);
-                self.hl.write(de);
+                let (hl, de) = (self.registers.hl.load(), self.registers.de.load());
+                self.registers.de.write(hl);
+                self.registers.hl.write(de);
             }
             AddR(r) => {
-                let a = self.alu.add(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.add(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AddM => {
@@ -235,7 +269,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             AdcR(r) => {
-                let a = self.alu.add_carried(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.add_carried(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AdcM => {
@@ -247,7 +281,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             SubR(r) => {
-                let a = self.alu.sub(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.sub(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             SubM => {
@@ -259,7 +293,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             SbbR(r) => {
-                let a = self.alu.sub(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.sub(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             SbbM => {
@@ -271,16 +305,16 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             InrR(r) => {
-                let a = self.alu.inr(self.load8_by_code(r));
-                self.write8_by_code(r, a);
+                let a = self.alu.inr(self.load_by_code(r));
+                self.write_by_code(r, a);
             }
             InrM => {
                 let a = self.alu.inr(self.load_mem_hl());
                 self.write_mem_hl(a);
             }
             DcrR(r) => {
-                let a = self.alu.dcr(self.load8_by_code(r));
-                self.write8_by_code(r, a);
+                let a = self.alu.dcr(self.load_by_code(r));
+                self.write_by_code(r, a);
             }
             DcrM => {
                 let a = self.alu.inr(self.load_mem_hl());
@@ -297,8 +331,8 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             Dad(rp) => {
                 let hl = self
                     .alu
-                    .dad(self.hl.load(), self.load16_by_code(rp));
-                self.hl.write(hl);
+                    .dad(self.registers.hl.load(), self.load16_by_code(rp));
+                self.registers.hl.write(hl);
             }
             Daa => {
                 // TODO: neg true?
@@ -306,7 +340,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(daa);
             }
             AnaR(r) => {
-                let a = self.alu.and(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.and(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AnaM => {
@@ -318,7 +352,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             XraR(r) => {
-                let a = self.alu.xor(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.xor(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             XraM => {
@@ -330,7 +364,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             OraR(r) => {
-                let a = self.alu.or(self.load_acc(), self.load8_by_code(r));
+                let a = self.alu.or(self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             OraM => {
@@ -342,7 +376,7 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a);
             }
             CmpR(r) => {
-                self.alu.sub(self.load_acc(), self.load8_by_code(r));
+                self.alu.sub(self.load_acc(), self.load_by_code(r));
             }
             CmpM => {
                 self.alu.sub(self.load_acc(), self.load_mem_hl());
@@ -396,34 +430,34 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
             Rm => self.ret_on(F_SIGN, true),
             Rpe => self.ret_on(F_PARITY, true),
             Rpo => self.ret_on(F_PARITY, false),
-            PcHL => self.pc.write(self.hl.load()),
+            PcHL => self.pc.write(self.registers.hl.load()),
             PushRP(rp) => {
-                let sp = self.sp.load().wrapping_sub(2);
+                let sp = self.registers.sp.load().wrapping_sub(2);
                 self.write16_mem_at(sp, self.load16_by_code(rp));
-                self.sp.write(sp);
+                self.registers.sp.write(sp);
             }
             PushPSW => {
-                let sp = self.sp.load().wrapping_sub(2);
+                let sp = self.registers.sp.load().wrapping_sub(2);
                 self.write_mem_at(sp.wrapping_add(1), self.load_acc());
                 self.write_mem_at(sp, self.alu.load_flag() | 0b10);
-                self.sp.write(sp);
+                self.registers.sp.write(sp);
             }
             PopRP(rp) => {
-                let sp = self.sp.load();
+                let sp = self.registers.sp.load();
                 self.write16_by_code(rp, self.load16_mem_at(sp));
-                self.sp.write(sp.wrapping_add(2));
+                self.registers.sp.write(sp.wrapping_add(2));
             }
             PopPSW => {
-                let sp = self.sp.load();
+                let sp = self.registers.sp.load();
                 self.alu.write_flag(self.load_mem_at(sp) | !0b10);
-                self.a.write(self.load_mem_at(sp.wrapping_add(1)));
-                self.sp.write(sp.wrapping_add(2));
+                self.write_acc(self.load_mem_at(sp.wrapping_add(1)));
+                self.registers.sp.write(sp.wrapping_add(2));
             }
             XtHL => {
-                let sp = self.sp.load();
-                self.hl.write(self.load16_mem_at(sp));
+                let sp = self.registers.sp.load();
+                self.registers.hl.write(self.load16_mem_at(sp));
             }
-            SpHL => self.sp.write(self.hl.load()),
+            SpHL => self.registers.sp.write(self.registers.hl.load()),
             In(port) => {
                 let mut buf = String::new();
                 std::io::stdin().read_line(&mut buf).expect("IO error");
@@ -431,14 +465,14 @@ impl CPU88<Memory8Bit64KB, R16Bits, R16Bits8Bits, R8Bits> {
                 self.write_acc(a)
             }
             Out(port) => {
-                println!("{}", self.a.load());
+                println!("{}", self.load_acc());
             }
             EI => self.interruptable = true,
             DI => self.interruptable = false,
             Rst(addr) => {
-                let sp = self.sp.load().wrapping_sub(2);
+                let sp = self.registers.sp.load().wrapping_sub(2);
                 self.write16_mem_at(sp, self.pc.load());
-                self.sp.write(sp);
+                self.registers.sp.write(sp);
                 self.pc.write(addr * 8);
             }
             Hlt => self.halted = true,
@@ -456,20 +490,20 @@ mod test {
 
     #[test]
     fn cpu_test() {
-        let mut cpu = CPU88::new();
+        let mut cpu = CPU88::default();
         // calculate sum of 1..=80 (that equals 3240 = 81 * 80 / 2)
         let codes = &[
-            0x3e, 0x50,       //       mov a,=80
-            0x47,             // loop: mov b,a
-            0x09,             //       dad b
-            0x3d,             //       dcr a
+            0x3e, 0x50, //       mov a,=80
+            0x47, // loop: mov b,a
+            0x09, //       dad b
+            0x3d, //       dcr a
             0xc2, 0x02, 0x00, //       jnz loop
-            0x76,             //       halt
+            0x76, //       halt
         ];
         cpu.flush(codes);
         println!("{:?}", cpu);
         cpu.run();
         println!("{:?}", cpu);
-        assert_eq!(cpu.hl.load(), (1..=0x50).sum());
+        assert_eq!(cpu.registers.hl.load(), (1..=0x50).sum());
     }
 }

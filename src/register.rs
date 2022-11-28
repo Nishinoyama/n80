@@ -1,11 +1,12 @@
 use std::mem::transmute;
 
-pub trait Register<B> {
-    fn write(&mut self, bits: B);
-    fn load(&self) -> B;
+pub trait Register {
+    type Size;
+    fn write(&mut self, bits: Self::Size);
+    fn load(&self) -> Self::Size;
 }
 
-pub trait RegisterDividable<B, C>: Register<B> {
+pub trait RegisterDividable<C>: Register {
     fn write_l(&mut self, bits: C);
     fn load_l(&self) -> C;
     fn write_h(&mut self, bits: C);
@@ -17,7 +18,8 @@ pub struct R16Bits {
     bits: u16,
 }
 
-impl Register<u16> for R16Bits {
+impl Register for R16Bits {
+    type Size = u16;
     #[inline]
     fn write(&mut self, bits: u16) {
         self.bits = bits
@@ -33,7 +35,7 @@ pub struct R16Bits8Bits {
     bits: u16,
 }
 
-impl RegisterDividable<u16, u8> for R16Bits8Bits {
+impl RegisterDividable<u8> for R16Bits8Bits {
     fn write_l(&mut self, bits: u8) {
         unsafe {
             *transmute::<&u16, *mut u8>(&self.bits).add(1) = bits;
@@ -54,7 +56,8 @@ impl RegisterDividable<u16, u8> for R16Bits8Bits {
     }
 }
 
-impl Register<u16> for R16Bits8Bits {
+impl Register for R16Bits8Bits {
+    type Size = u16;
     #[inline]
     fn write(&mut self, bits: u16) {
         self.bits = bits
@@ -70,7 +73,8 @@ pub struct R8Bits {
     bits: u8,
 }
 
-impl Register<u8> for R8Bits {
+impl Register for R8Bits {
+    type Size = u8;
     #[inline]
     fn write(&mut self, bits: u8) {
         self.bits = bits
