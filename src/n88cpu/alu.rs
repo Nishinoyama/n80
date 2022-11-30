@@ -1,332 +1,236 @@
-use crate::register::{R8Bits, Register};
+use crate::alu::{ALUStatus, ALU};
+use std::mem::transmute;
 
-/// Flag Carry
-pub const F_CARRY: u8 = 1;
-/// Flag Parity
-pub const F_PARITY: u8 = 4;
-/// Flag Half Carry (or AUX Carry) for BDC
-pub const F_HALF_CARRY: u8 = 16;
-/// Flag Zero
-pub const F_ZERO: u8 = 64;
-/// Flag Sign
-pub const F_SIGN: u8 = 128;
+#[repr(u8)]
+pub enum ALU88Flags {
+    /// Flag Carry
+    Carry = 1,
+    /// Flag Parity
+    Parity = 4,
+    /// Flag Half Carry (or AUX Carry) for BDC
+    HalfCarry = 16,
+    /// Flag Zero
+    Zero = 64,
+    /// Flag Sign
+    Sign = 128,
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct ALU88Status(u8);
+
+impl ALUStatus for ALU88Status {
+    type Flags = ALU88Flags;
+    fn change(&mut self, flag: Self::Flags, set: bool) {
+        let f: u8 = unsafe { transmute(flag) };
+        if set {
+            self.0 |= f;
+        } else {
+            self.0 &= !f;
+        }
+    }
+    fn get_flag(&mut self, flag: Self::Flags) -> bool {
+        let f: u8 = unsafe { transmute(flag) };
+        return (self.0 & f) != 0;
+    }
+}
+
+impl ALU88Status {
+    pub fn change_by_result(&mut self, res: <ALU88 as ALU>::Data) {
+        self.change(ALU88Flags::Parity, res.count_ones() % 2 == 0);
+        self.change(ALU88Flags::Sign, res >= 0x80);
+        self.change(ALU88Flags::Zero, res == 0);
+    }
+}
+
+#[derive(Debug)]
+pub enum ALU88Codes {
+    /// a + b
+    Add,
+    /// a + b + 1
+    Adc,
+    /// a - b
+    Sub,
+    /// a - b - 1
+    Sbb,
+    /// a & b
+    Ana,
+    /// a | b
+    Ora,
+    /// a xor b
+    Xra,
+    /// !a
+    Cma,
+    /// -a
+    Neg,
+    /// Rot left
+    Rlc,
+    /// Rot left with CY
+    Ral,
+    /// Rot right
+    Rrc,
+    /// Rot right with CY
+    Rar,
+    /// a += 1
+    Inr,
+    /// a -= 1
+    Dcr,
+}
 
 /// ALU(Arithmetic Logic Unit) with Flags
 #[derive(Debug, Default)]
-pub struct ArithmeticLogicUnit88 {
-    /// Flag
-    /// b0: (C) Carry
-    /// b2: (P) Parity
-    /// b4: (H) AUX Carry
-    /// b6: (Z) Zero
-    /// b7: (S) Sign
-    flag: R8Bits,
-}
+pub struct ALU88 {}
 
-impl ArithmeticLogicUnit88 {
-    #[inline]
-    pub fn write_flag(&mut self, flag: u8) {
-        self.flag.write(flag);
-    }
-    #[inline]
-    pub fn set_flag_of(&mut self, flag: u8) {
-        self.write_flag(self.load_flag() | flag);
-    }
-    #[inline]
-    pub fn reset_flag_of(&mut self, flag: u8) {
-        self.write_flag(self.load_flag() & !flag);
-    }
-    pub fn change_flag_of(&mut self, flag: u8, set: bool) {
-        if set {
-            self.set_flag_of(flag);
-        } else {
-            self.reset_flag_of(flag);
-        }
-    }
-    #[inline]
-    pub fn get_flag_of(&self, flag: u8) -> bool {
-        (self.load_flag() & flag) == flag
-    }
-    #[inline]
-    pub fn load_flag(&self) -> u8 {
-        self.flag.load()
-    }
-    #[inline]
-    fn change_flags_with_result(&mut self, result: u8) {
-        self.change_flag_of(F_PARITY, result.count_ones() % 2 == 0);
-        self.change_flag_of(F_SIGN, result >= 0x80);
-        self.change_flag_of(F_ZERO, result == 0x00);
-    }
-    pub fn add(&mut self, a: u8, n: u8) -> u8 {
-        let (x, ovf) = a.overflowing_add(n);
-        self.change_flag_of(F_CARRY, ovf);
-        self.change_flag_of(F_HALF_CARRY, a % 0x10 + n % 0x10 >= 0x10);
-        self.change_flags_with_result(x);
-        x
-    }
-    /// add with carry
-    pub fn add_carried(&mut self, a: u8, n: u8) -> u8 {
-        if !self.get_flag_of(F_CARRY) {
-            self.add(a, n)
-        } else {
-            let (x, ovf1) = a.overflowing_add(1);
-            let (x, ovf2) = x.overflowing_add(n);
-            self.change_flag_of(F_CARRY, ovf1 | ovf2);
-            self.change_flag_of(F_HALF_CARRY, a % 0x10 + n % 0x10 + 1 >= 0x10);
-            self.change_flags_with_result(x);
-            x
-        }
-    }
-    #[inline]
-    pub fn sub(&mut self, a: u8, n: u8) -> u8 {
-        self.set_flag_of(F_CARRY);
-        let x = self.add_carried(a, !n);
-        self.change_flag_of(F_CARRY, !self.get_flag_of(F_CARRY));
-        self.change_flag_of(F_HALF_CARRY, a % 0x10 < n % 0x10);
-        x
-    }
-    #[inline]
-    pub fn sub_borrowed(&mut self, a: u8, n: u8) -> u8 {
-        if self.get_flag_of(F_CARRY) {
-            let x = self.add(a, !n);
-            self.change_flag_of(F_CARRY, !self.get_flag_of(F_CARRY));
-            self.change_flag_of(F_HALF_CARRY, a % 0x10 < n % 0x10 + 1);
-            x
-        } else {
-            self.sub(a, n)
-        }
-    }
-    pub fn and(&mut self, a: u8, n: u8) -> u8 {
-        let x = a & n;
-        self.set_flag_of(F_HALF_CARRY);
-        self.reset_flag_of(F_CARRY);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn or(&mut self, a: u8, n: u8) -> u8 {
-        let x = a | n;
-        self.set_flag_of(F_HALF_CARRY);
-        self.reset_flag_of(F_CARRY);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn xor(&mut self, a: u8, n: u8) -> u8 {
-        let x = a ^ n;
-        self.set_flag_of(F_HALF_CARRY);
-        self.reset_flag_of(F_CARRY);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn inr(&mut self, a: u8) -> u8 {
-        let x = a.wrapping_add(1);
-        self.change_flag_of(F_HALF_CARRY, a % 0x10 + 1 >= 0x10);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn dcr(&mut self, n: u8) -> u8 {
-        let x = n.wrapping_sub(1);
-        self.change_flag_of(F_HALF_CARRY, n % 8 == 0);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn daa(&mut self, a: u8, neg: bool) -> u8 {
-        let mut x = a;
-        if x % 0x10 > 9 || self.get_flag_of(F_HALF_CARRY) {
-            x = if neg {
-                x.wrapping_sub(0x06)
-            } else {
-                x.wrapping_add(0x06)
+impl ALU88 {}
+
+impl ALU for ALU88 {
+    type Data = u8;
+    type Control = ALU88Codes;
+    type Status = ALU88Status;
+    fn op(&self, code: Self::Control, a: Self::Data, b: Self::Data) -> (Self::Data, Self::Status) {
+        use ALU88Codes::*;
+        use ALU88Flags::*;
+        let mut stat = ALU88Status(0);
+        let res = match code {
+            Add => {
+                let (x, ovf) = a.overflowing_add(b);
+                stat.change_by_result(x);
+                stat.change(Carry, ovf);
+                stat.change(HalfCarry, a % 0x10 + b % 0x10 >= 0x10);
+                x
             }
-        }
-        if x / 0x10 > 9 || self.get_flag_of(F_CARRY) {
-            x = if neg {
-                x.wrapping_sub(0x60)
-            } else {
-                x.wrapping_add(0x60)
+            Adc => {
+                let (x, ovf1) = a.overflowing_add(1);
+                let (x, ovf2) = x.overflowing_add(b);
+                stat.change_by_result(x);
+                stat.change(Carry, ovf1 | ovf2);
+                stat.change(HalfCarry, a % 0x10 + b % 0x10 + 1 >= 0x10);
+                x
+            }
+            Sub => {
+                let (x, ovf) = a.overflowing_sub(b);
+                stat.change_by_result(x);
+                stat.change(Carry, ovf);
+                stat.change(HalfCarry, a % 0x10 < b % 0x10);
+                x
+            }
+            Sbb => {
+                let (x, ovf1) = a.overflowing_sub(b);
+                let (x, ovf2) = x.overflowing_sub(1);
+                stat.change_by_result(x);
+                stat.change(Carry, ovf1 | ovf2);
+                stat.change(HalfCarry, a % 0x10 < b % 0x10 + 1);
+                x
+            }
+            Ana => {
+                let x = a & b;
+                stat.change_by_result(x);
+                stat.reset(Carry);
+                stat.set(HalfCarry);
+                x
+            }
+            Ora => {
+                let x = a | b;
+                stat.change_by_result(x);
+                stat.reset(Carry);
+                stat.set(HalfCarry);
+                x
+            }
+            Xra => {
+                let x = a ^ b;
+                stat.change_by_result(x);
+                stat.reset(Carry);
+                stat.set(HalfCarry);
+                x
+            }
+            Cma => {
+                let x = !a;
+                stat.set(HalfCarry);
+                x
+            }
+            Neg => {
+                let x = 0u8.wrapping_sub(a);
+                stat.change_by_result(x);
+                stat.change(Carry, a == 0x00);
+                stat.change(HalfCarry, a % 8 == 0);
+                x
+            }
+            Rlc => {
+                let x = a.rotate_left(1);
+                stat.change(Carry, a >= 0x80);
+                stat.reset(HalfCarry);
+                x
+            }
+            Ral => {
+                let x = a << 1 | ((b != 0) as u8);
+                stat.change(Carry, a >= 0x80);
+                stat.reset(HalfCarry);
+                x
+            }
+            Rrc => {
+                let x = a.rotate_right(1);
+                stat.change(Carry, a % 2 == 1);
+                stat.reset(HalfCarry);
+                x
+            }
+            Rar => {
+                let x = a >> 1 | ((b != 0) as u8) << 7;
+                stat.change(Carry, a % 2 == 1);
+                stat.reset(HalfCarry);
+                x
+            }
+            Inr => {
+                let x = a.wrapping_add(1);
+                stat.change_by_result(x);
+                stat.change(HalfCarry, a % 0x10 + 1 >= 0x10);
+                x
+            }
+            Dcr => {
+                let x = a.wrapping_sub(1);
+                stat.change_by_result(x);
+                stat.change(HalfCarry, a % 0x10 == 0);
+                x
             }
         };
-        x
-    }
-    pub fn cpl(&mut self, a: u8) -> u8 {
-        let x = !a;
-        self.set_flag_of(F_HALF_CARRY);
-        x
-    }
-    pub fn neg(&mut self, a: u8) -> u8 {
-        let x = 0u8.wrapping_sub(a);
-        self.change_flag_of(F_CARRY, a == 0x00);
-        self.change_flag_of(F_HALF_CARRY, a % 8 == 0);
-        self.change_flags_with_result(x);
-        x
-    }
-    pub fn ccf(&mut self) {
-        self.change_flag_of(F_HALF_CARRY, self.get_flag_of(F_CARRY));
-        self.change_flag_of(F_CARRY, self.get_flag_of(F_CARRY));
-    }
-    pub fn scf(&mut self) {
-        self.reset_flag_of(F_HALF_CARRY);
-        self.set_flag_of(F_CARRY);
-    }
-    pub fn rlc(&mut self, a: u8) -> u8 {
-        let x = a.rotate_left(1);
-        self.change_flag_of(F_CARRY, a >= 0x80);
-        self.reset_flag_of(F_HALF_CARRY);
-        x
-    }
-    pub fn ral(&mut self, a: u8) -> u8 {
-        let x = a << 1 | (self.get_flag_of(F_CARRY) as u8);
-        self.change_flag_of(F_CARRY, a >= 0x80);
-        self.reset_flag_of(F_HALF_CARRY);
-        x
-    }
-    pub fn rrc(&mut self, a: u8) -> u8 {
-        let x = a.rotate_right(1);
-        self.change_flag_of(F_CARRY, a % 2 == 1);
-        self.reset_flag_of(F_HALF_CARRY);
-        x
-    }
-    pub fn rar(&mut self, a: u8) -> u8 {
-        let x = a >> 1 | (self.get_flag_of(F_CARRY) as u8) << 7;
-        self.change_flag_of(F_CARRY, a % 2 == 1);
-        self.reset_flag_of(F_HALF_CARRY);
-        x
-    }
-    pub fn dad(&mut self, hl: u16, n: u16) -> u16 {
-        let (x, ovf) = hl.overflowing_add(n);
-        self.change_flag_of(F_CARRY, ovf);
-        self.change_flag_of(F_HALF_CARRY, hl % 0x1000 + n % 0x1000 > 0x1000);
-        x
-    }
-    pub fn inx(&mut self, n: u16) -> u16 {
-        n.wrapping_add(1)
-    }
-    pub fn dcx(&mut self, n: u16) -> u16 {
-        n.wrapping_sub(1)
-    }
-    pub fn cmc(&mut self) {
-        let cy = self.get_flag_of(F_CARRY);
-        self.change_flag_of(F_CARRY, !cy);
-    }
-    pub fn stc(&mut self) {
-        self.change_flag_of(F_CARRY, true);
+        (res, stat)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use super::ALU88Codes::*;
+    use super::ALU88Flags::*;
+    use super::ALU88Status as S;
     use super::*;
 
     #[test]
     fn add() {
-        let mut arith = ArithmeticLogicUnit88::default();
+        let mut arith = ALU88::default();
         // no carrying
-        assert_eq!(arith.add(0x23, 0x34), 0x57);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(!arith.get_flag_of(F_PARITY));
-        assert!(!arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x57, false), 0x57);
+        assert_eq!(arith.op(Add, 0x23, 0x34), (0x57, S(0b0000_0000)));
         // half carrying
-        assert_eq!(arith.add(0x28, 0x39), 0x61);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(!arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x61, false), 0x67);
+        assert_eq!(arith.op(Add, 0x28, 0x39), (0x61, S(0b0001_0000)));
         // top carrying
-        assert_eq!(arith.add(0x90, 0x81), 0x11);
-        assert!(arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(!arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x11, false), 0x71);
+        assert_eq!(arith.op(Add, 0x90, 0x81), (0x11, S(0b0000_0101)));
         // both carrying
-        assert_eq!(arith.add(0x98, 0x88), 0x20);
-        assert!(arith.get_flag_of(F_CARRY));
-        assert!(!arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x20, false), 0x86);
+        assert_eq!(arith.op(Add, 0x98, 0x88), (0x20, S(0b0001_0001)));
         // signed overflow
-        assert_eq!(arith.add(0x4a, 0x39), 0x83);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(!arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(arith.get_flag_of(F_SIGN));
+        assert_eq!(arith.op(Add, 0x4b, 0x38), (0x83, S(0b1001_0000)));
         // ZERO
-        assert_eq!(arith.add(0x81, 0x7f), 0x00);
-        assert!(arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
+        assert_eq!(arith.op(Add, 0x81, 0x7f), (0x00, S(0b0101_0101)));
     }
 
     #[test]
     fn sub() {
-        let mut arith = ArithmeticLogicUnit88::default();
+        let mut arith = ALU88::default();
         // no borrowing
-        assert_eq!(arith.sub(0x23, 0x11), 0x12);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(!arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x12, true), 0x12);
+        assert_eq!(arith.op(Sub, 0x23, 0x11), (0x12, S(0b0000_0100)));
         // half borrowing
-        assert_eq!(arith.sub(0x68, 0x39), 0x2f);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(!arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x2f, true), 0x29);
+        assert_eq!(arith.op(Sub, 0x68, 0x39), (0x2f, S(0b0001_0000)));
         // top borrowing
-        assert_eq!(arith.sub(0x27, 0x81), 0xa6);
-        assert!(arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(!arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0xa6, true), 0x46);
+        assert_eq!(arith.op(Sub, 0x27, 0x81), (0xa6, S(0b1000_0101)));
         // both borrowing
-        assert_eq!(arith.sub(0x23, 0x45), 0xde);
-        assert!(arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(arith.get_flag_of(F_HALF_CARRY));
-        assert!(!arith.get_flag_of(F_ZERO));
-        assert!(arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0xde, true), 0x78);
+        assert_eq!(arith.op(Sub, 0x23, 0x45), (0xde, S(0b1001_0101)));
         // exact zero
-        assert_eq!(arith.sub(0x67, 0x67), 0x00);
-        assert!(!arith.get_flag_of(F_CARRY));
-        assert!(arith.get_flag_of(F_PARITY));
-        assert!(!arith.get_flag_of(F_HALF_CARRY));
-        assert!(arith.get_flag_of(F_ZERO));
-        assert!(!arith.get_flag_of(F_SIGN));
-        assert_eq!(arith.daa(0x00, true), 0x00);
-    }
-
-    #[test]
-    fn r16_arith() {
-        let mut arith = ArithmeticLogicUnit88::default();
-        // 0x3191 + 0x47a1 = 0x7932 (not carried)
-        let (a1, a2, b1, b2) = (0x31, 0x91, 0x47, 0xa1);
-        let x2 = arith.add(a2, b2);
-        let x1 = arith.add_carried(a1, b1);
-        assert_eq!(x1, 0x79);
-        assert_eq!(x2, 0x32);
-        assert!(!arith.get_flag_of(F_CARRY));
-        // 0x3191 - 0x47a1 = 0xe9f0 (borrowed)
-        let x2 = arith.sub(a2, b2);
-        let x1 = arith.sub_borrowed(a1, b1);
-        assert_eq!(x1, 0xe9);
-        assert_eq!(x2, 0xf0);
-        assert!(arith.get_flag_of(F_CARRY));
+        assert_eq!(arith.op(Sub, 0x67, 0x67), (0x00, S(0b0100_0100)));
     }
 }
