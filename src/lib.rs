@@ -1,4 +1,5 @@
 // pub mod cpu;
+pub mod alu;
 pub mod instruction;
 pub mod memory;
 pub mod n88cpu;
