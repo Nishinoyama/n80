@@ -1,3 +1,15 @@
+pub trait ALUStatus {
+    type Flags;
+    fn change(&mut self, flag: Self::Flags, set: bool);
+    fn get_flag(&mut self, flag: Self::Flags) -> bool;
+    fn set(&mut self, flag: Self::Flags) {
+        self.change(flag, true);
+    }
+    fn reset(&mut self, flag: Self::Flags) {
+        self.change(flag, false);
+    }
+}
+
 pub trait ALU {
     type Data;
     type Control;
