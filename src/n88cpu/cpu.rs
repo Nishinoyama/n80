@@ -1,6 +1,7 @@
+use crate::alu::ALU;
 use crate::instruction::InstructionDecoder;
 use crate::memory::{Memory, Memory8Bit64KB};
-use crate::n88cpu::alu::ArithmeticLogicUnit88;
+use crate::n88cpu::alu::{ALU88Codes, ALU88Status, ALU88};
 use crate::n88cpu::instruction::{Bit16RegisterCode, Bit8RegisterCode, N88InstructionSet};
 use crate::register::{R16Bits, R16Bits8Bits, R8Bits, Register, RegisterDividable};
 use crate::register_set::RegisterSet;
@@ -9,6 +10,13 @@ use std::fmt::{Debug, Formatter};
 #[derive(Default)]
 pub struct N88RegisterSet {
     a: R8Bits,
+    /// Flag
+    /// b0: (C) Carry
+    /// b2: (P) Parity
+    /// b4: (H) AUX Carry
+    /// b6: (Z) Zero
+    /// b7: (S) Sign
+    flag: R8Bits,
     bc: R16Bits8Bits,
     de: R16Bits8Bits,
     hl: R16Bits8Bits,
@@ -83,8 +91,11 @@ impl RegisterSet<Bit16RegisterCode> for N88RegisterSet {
 }
 
 #[derive(Default)]
-pub struct CPU88<M: Memory<Address = u16, Data = u8>> {
-    alu: ArithmeticLogicUnit88,
+pub struct CPU88<
+    A: ALU<Data = u8, Control = ALU88Codes, Status = ALU88Status>,
+    M: Memory<Address = u16, Data = u8>,
+> {
+    alu: A,
     mem: M,
     registers: N88RegisterSet,
     pc: R16Bits,
@@ -92,7 +103,7 @@ pub struct CPU88<M: Memory<Address = u16, Data = u8>> {
     halted: bool,
 }
 
-impl Debug for CPU88<Memory8Bit64KB> {
+impl Debug for CPU88<ALU88, Memory8Bit64KB> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut builder = String::new();
         builder += &format!("{:?}\n", self.registers);
@@ -105,10 +116,10 @@ impl Debug for CPU88<Memory8Bit64KB> {
     }
 }
 
-impl CPU88<Memory8Bit64KB> {
-    pub fn new() -> CPU88<Memory8Bit64KB> {
+impl CPU88<ALU88, Memory8Bit64KB> {
+    pub fn new() -> Self {
         CPU88 {
-            alu: ArithmeticLogicUnit88::default(),
+            alu: ALU88::default(),
             mem: Memory8Bit64KB::default(),
             registers: N88RegisterSet::default(),
             pc: Default::default(),
@@ -234,7 +245,8 @@ impl CPU88<Memory8Bit64KB> {
     }
 
     pub fn run_instruct(&mut self, inst: N88InstructionSet) {
-        use super::alu::*;
+        use super::alu::ALU88Codes as AC;
+        use super::alu::ALU88Flags::*;
         use Bit16RegisterCode::*;
         use Bit8RegisterCode::*;
         use N88InstructionSet::*;
@@ -257,75 +269,76 @@ impl CPU88<Memory8Bit64KB> {
                 self.registers.hl.write(de);
             }
             AddR(r) => {
-                let a = self.alu.add(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Add, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AddM => {
-                let a = self.alu.add(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Add, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Adi(n) => {
-                let a = self.alu.add(self.load_acc(), n);
+                let a = self.alu.op(AC::Add, self.load_acc(), n);
                 self.write_acc(a);
             }
             AdcR(r) => {
-                let a = self.alu.add_carried(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Adc, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AdcM => {
-                let a = self.alu.add_carried(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Adc, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Aci(n) => {
-                let a = self.alu.add_carried(self.load_acc(), n);
+                let a = self.alu.op(AC::Adc, self.load_acc(), n);
                 self.write_acc(a);
             }
             SubR(r) => {
-                let a = self.alu.sub(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Sub, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             SubM => {
-                let a = self.alu.sub(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Sub, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Sui(n) => {
-                let a = self.alu.sub(self.load_acc(), n);
+                let a = self.alu.op(AC::Sub, self.load_acc(), n);
                 self.write_acc(a);
             }
             SbbR(r) => {
-                let a = self.alu.sub(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Sub, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             SbbM => {
-                let a = self.alu.sub(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Sub, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Sbi(n) => {
-                let a = self.alu.sub(self.load_acc(), n);
+                let a = self.alu.op(AC::Sub, self.load_acc(), n);
                 self.write_acc(a);
             }
             InrR(r) => {
-                let a = self.alu.inr(self.load_by_code(r));
+                let a = self.alu.op(AC::Inr, self.load_by_code(r));
                 self.write_by_code(r, a);
             }
             InrM => {
-                let a = self.alu.inr(self.load_mem_hl());
+                let a = self.alu.op(AC::Inr, self.load_mem_hl());
                 self.write_mem_hl(a);
             }
             DcrR(r) => {
-                let a = self.alu.dcr(self.load_by_code(r));
+                let a = self.alu.op(AC::Dcr, self.load_by_code(r));
                 self.write_by_code(r, a);
             }
             DcrM => {
-                let a = self.alu.inr(self.load_mem_hl());
+                let a = self.alu.op(AC::Dcr, self.load_mem_hl());
                 self.write_mem_hl(a);
             }
             Inx(rp) => {
-                let a = self.alu.inx(self.load16_by_code(rp));
+                todo!("flags!");
+                let a = self.load16_by_code(rp).wrapping_add(1);
                 self.write16_by_code(rp, a);
             }
             Dcx(rp) => {
-                let a = self.alu.inx(self.load16_by_code(rp));
+                let a = self.load16_by_code(rp).wrapping_sub(1);
                 self.write16_by_code(rp, a);
             }
             Dad(rp) => {
@@ -336,100 +349,114 @@ impl CPU88<Memory8Bit64KB> {
             }
             Daa => {
                 // TODO: neg true?
-                let daa = self.alu.daa(self.load_acc(), false);
-                self.write_acc(daa);
+                let mut x = a;
+                if x % 0x10 > 9 || self.get_flag_of(F_HALF_CARRY) {
+                    x = if neg {
+                        x.wrapping_sub(0x06)
+                    } else {
+                        x.wrapping_add(0x06)
+                    }
+                }
+                if x / 0x10 > 9 || self.get_flag_of(F_CARRY) {
+                    x = if neg {
+                        x.wrapping_sub(0x60)
+                    } else {
+                        x.wrapping_add(0x60)
+                    }
+                };
+                self.write_acc(x);
             }
             AnaR(r) => {
-                let a = self.alu.and(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Ana, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             AnaM => {
-                let a = self.alu.and(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Ana, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Ani(n) => {
-                let a = self.alu.and(self.load_acc(), n);
+                let a = self.alu.op(AC::Ana, self.load_acc(), n);
                 self.write_acc(a);
             }
             XraR(r) => {
-                let a = self.alu.xor(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Xra, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             XraM => {
-                let a = self.alu.xor(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Xra, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Xri(n) => {
-                let a = self.alu.xor(self.load_acc(), n);
+                let a = self.alu.op(AC::Xra, self.load_acc(), n);
                 self.write_acc(a);
             }
             OraR(r) => {
-                let a = self.alu.or(self.load_acc(), self.load_by_code(r));
+                let a = self.alu.op(AC::Ora, self.load_acc(), self.load_by_code(r));
                 self.write_acc(a);
             }
             OraM => {
-                let a = self.alu.or(self.load_acc(), self.load_mem_hl());
+                let a = self.alu.op(AC::Ora, self.load_acc(), self.load_mem_hl());
                 self.write_acc(a);
             }
             Ori(n) => {
-                let a = self.alu.or(self.load_acc(), n);
+                let a = self.alu.op(AC::Ora, self.load_acc(), n);
                 self.write_acc(a);
             }
             CmpR(r) => {
-                self.alu.sub(self.load_acc(), self.load_by_code(r));
+                self.alu.op(AC::Sub, self.load_acc(), self.load_by_code(r));
             }
             CmpM => {
-                self.alu.sub(self.load_acc(), self.load_mem_hl());
+                self.alu.op(AC::Sub, self.load_acc(), self.load_mem_hl());
             }
             Cpi(n) => {
-                self.alu.sub(self.load_acc(), n);
+                self.alu.op(AC::Sub, self.load_acc(), n);
             }
             Rlc => {
-                let a = self.alu.rlc(self.load_acc());
+                let a = self.alu.op(AC::Rlc, self.load_acc());
                 self.write_acc(a)
             }
             Rrc => {
-                let a = self.alu.rrc(self.load_acc());
+                let a = self.alu.op(AC::Rrc, self.load_acc());
                 self.write_acc(a)
             }
             Ral => {
-                let a = self.alu.rrc(self.load_acc());
+                let a = self.alu.op(AC::Rrc, self.load_acc());
                 self.write_acc(a)
             }
             Rar => {
-                let a = self.alu.rar(self.load_acc());
+                let a = self.alu.op(AC::Rar, self.load_acc());
                 self.write_acc(a)
             }
             Cma => self.write_acc(!self.load_acc()),
             Cmc => self.alu.cmc(),
             Stc => self.alu.stc(),
             Jmp(addr) => self.jump(addr),
-            Jc(addr) => self.jump_on(F_CARRY, true, addr),
-            Jnc(addr) => self.jump_on(F_CARRY, false, addr),
-            Jz(addr) => self.jump_on(F_ZERO, true, addr),
-            Jnz(addr) => self.jump_on(F_ZERO, false, addr),
-            Jp(addr) => self.jump_on(F_SIGN, false, addr),
-            Jm(addr) => self.jump_on(F_SIGN, true, addr),
-            Jpe(addr) => self.jump_on(F_PARITY, true, addr),
-            Jpo(addr) => self.jump_on(F_PARITY, false, addr),
+            Jc(addr) => self.jump_on(Carry, true, addr),
+            Jnc(addr) => self.jump_on(Carry, false, addr),
+            Jz(addr) => self.jump_on(Zero, true, addr),
+            Jnz(addr) => self.jump_on(Zero, false, addr),
+            Jp(addr) => self.jump_on(Sign, false, addr),
+            Jm(addr) => self.jump_on(Sign, true, addr),
+            Jpe(addr) => self.jump_on(Parity, true, addr),
+            Jpo(addr) => self.jump_on(Parity, false, addr),
             Call(addr) => self.call(addr),
-            Cc(addr) => self.call_on(F_CARRY, true, addr),
-            Cnc(addr) => self.call_on(F_CARRY, false, addr),
-            Cz(addr) => self.call_on(F_ZERO, true, addr),
-            Cnz(addr) => self.call_on(F_ZERO, false, addr),
-            Cp(addr) => self.call_on(F_SIGN, false, addr),
-            Cm(addr) => self.call_on(F_SIGN, true, addr),
-            Cpe(addr) => self.call_on(F_PARITY, true, addr),
-            Cpo(addr) => self.call_on(F_PARITY, false, addr),
+            Cc(addr) => self.call_on(Carry, true, addr),
+            Cnc(addr) => self.call_on(Carry, false, addr),
+            Cz(addr) => self.call_on(Zero, true, addr),
+            Cnz(addr) => self.call_on(Zero, false, addr),
+            Cp(addr) => self.call_on(Sign, false, addr),
+            Cm(addr) => self.call_on(Sign, true, addr),
+            Cpe(addr) => self.call_on(Parity, true, addr),
+            Cpo(addr) => self.call_on(Parity, false, addr),
             Ret => self.ret(),
-            Rc => self.ret_on(F_CARRY, true),
-            Rnc => self.ret_on(F_CARRY, false),
-            Rz => self.ret_on(F_ZERO, true),
-            Rnz => self.ret_on(F_ZERO, false),
-            Rp => self.ret_on(F_SIGN, false),
-            Rm => self.ret_on(F_SIGN, true),
-            Rpe => self.ret_on(F_PARITY, true),
-            Rpo => self.ret_on(F_PARITY, false),
+            Rc => self.ret_on(Carry, true),
+            Rnc => self.ret_on(Carry, false),
+            Rz => self.ret_on(Zero, true),
+            Rnz => self.ret_on(Zero, false),
+            Rp => self.ret_on(Sign, false),
+            Rm => self.ret_on(Sign, true),
+            Rpe => self.ret_on(Parity, true),
+            Rpo => self.ret_on(Parity, false),
             PcHL => self.pc.write(self.registers.hl.load()),
             PushRP(rp) => {
                 let sp = self.registers.sp.load().wrapping_sub(2);
